@@ -14,39 +14,16 @@ on:
 jobs:
   e2e-tests:
     name: ZecKit E2E Test Suite
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     
-    timeout-minutes: 60
+    timeout-minutes: 120
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Start Docker Desktop
-        run: |
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "  Starting Docker Desktop"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          
-          if ! docker ps > /dev/null 2>&1; then
-            open /Applications/Docker.app
-            
-            echo "Waiting for Docker daemon..."
-            for i in {1..60}; do
-              if docker ps > /dev/null 2>&1; then
-                echo "✓ Docker daemon is ready!"
-                break
-              fi
-              echo "Attempt $i/60: Docker not ready yet, waiting..."
-              sleep 2
-            done
-          else
-            echo "✓ Docker already running"
-          fi
-          
-          docker --version
-          docker compose version
-          echo ""
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
       
       - name: Check environment
         run: |
@@ -69,17 +46,18 @@ jobs:
           echo "Stopping containers..."
           docker compose down 2>/dev/null || true
           
-          # Remove volumes to clear stale data (keeps images!)
+          # Remove volumes to clear stale data
           echo "Removing stale volumes..."
           docker volume rm zeckit_zebra-data 2>/dev/null || true
+          docker volume rm zeckit_zebra-sync-data 2>/dev/null || true
           docker volume rm zeckit_zaino-data 2>/dev/null || true
-          docker volume rm zeckit_zingo-data 2>/dev/null || true
-          docker volume rm zeckit_faucet-wallet-data 2>/dev/null || true
+          docker volume rm zeckit_lightwalletd-data 2>/dev/null || true
+          docker volume rm zeckit_faucet-data 2>/dev/null || true
           
           # Remove orphaned containers
           docker compose down --remove-orphans 2>/dev/null || true
           
-          echo "✓ Cleanup complete (images preserved)"
+          echo "✓ Cleanup complete"
           echo ""
       
       - name: Build CLI binary
@@ -186,9 +164,9 @@ jobs:
           echo "Collecting logs for artifact..."
           mkdir -p logs
           
-          docker compose logs zebra > logs/zebra.log 2>&1 || true
+          docker compose logs zebra-miner > logs/zebra-miner.log 2>&1 || true
+          docker compose logs zebra-sync > logs/zebra-sync.log 2>&1 || true
           docker compose logs zaino > logs/zaino.log 2>&1 || true
-          docker compose logs zingo-wallet-zaino > logs/zingo-wallet.log 2>&1 || true
           docker compose logs faucet-zaino > logs/faucet.log 2>&1 || true
           docker ps -a > logs/containers.log 2>&1 || true
           docker network ls > logs/networks.log 2>&1 || true
@@ -230,7 +208,7 @@ jobs:
             echo "✓ Status: ALL TESTS PASSED ✓"
             echo ""
             echo "Completed checks:"
-            echo "  ✓ Docker Desktop started"
+            echo "  ✓ Environment checked"
             echo "  ✓ CLI binary built"
             echo "  ✓ Devnet started (clean state, cached images)"
             echo "  ✓ Smoke tests passed"

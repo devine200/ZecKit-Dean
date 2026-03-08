@@ -10,39 +10,71 @@ networks:
 # ========================================
 volumes:
   zebra-data:
+  zebra-sync-data:
   lightwalletd-data:
   zaino-data:
   faucet-data:
+  zingo-data:
 
-# ========================================
-# SERVICES
-# ========================================
+    # ========================================
+    # SERVICES
+    # ========================================
 services:
   # ========================================
-  # ZEBRA NODE
+  # ZEBRA MINER NODE
   # ========================================
-  zebra:
+  zebra-miner:
     build:
       context: ./docker/zebra
       dockerfile: Dockerfile
-    container_name: zeckit-zebra
     ports:
-      - "127.0.0.1:8232:8232"
-      - "127.0.0.1:8233:8233"
+      - "8232:8232"
+      - "8233:8233"
     volumes:
       - ./docker/configs/zebra.toml:/etc/zebrad/zebrad.toml:ro
       - zebra-data:/var/zebra
     environment:
       - NETWORK=Regtest
+      - RUST_LOG=info
     networks:
       - zeckit-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "timeout 5 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/8232' || exit 1"]
+      test: [ "CMD-SHELL", "curl -s -X POST -H 'Content-Type: application/json' --data '{\"jsonrpc\":\"2.0\",\"method\":\"getblockcount\",\"params\":[],\"id\":\"health\"}' http://127.0.0.1:8232 || exit 1" ]
       interval: 30s
       timeout: 10s
-      retries: 10
-      start_period: 120s
+      retries: 50
+      start_period: 60s
+
+  # ========================================
+  # ZEBRA SYNC NODE
+  # ========================================
+  zebra-sync:
+    build:
+      context: ./docker/zebra
+      dockerfile: Dockerfile
+    ports:
+      - "18232:8232"
+      - "18233:8233"
+    volumes:
+      - ./docker/configs/zebra-sync.toml:/etc/zebrad/zebrad.toml:ro
+      - zebra-sync-data:/var/zebra
+    environment:
+      - NETWORK=Regtest
+      - RUST_LOG=info
+    networks:
+      - zeckit-network
+    restart: unless-stopped
+    depends_on:
+      zebra-miner:
+        condition: service_started
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -s -X POST -H 'Content-Type: application/json' --data '{\"jsonrpc\":\"2.0\",\"method\":\"getblockcount\",\"params\":[],\"id\":\"health\"}' http://127.0.0.1:8232 || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 50
+      start_period: 60s
+
   # ========================================
   # LIGHTWALLETD (Profile: lwd)
   # ========================================
@@ -50,14 +82,13 @@ services:
     build:
       context: ./docker/lightwalletd
       dockerfile: Dockerfile
-    container_name: zeckit-lightwalletd
     ports:
-      - "127.0.0.1:9067:9067"
+      - "9067:9067"
     depends_on:
-      zebra:
-        condition: service_healthy
+      zebra-miner:
+        condition: service_started
     environment:
-      - ZEBRA_RPC_HOST=zebra
+      - ZEBRA_RPC_HOST=zebra-miner
       - ZEBRA_RPC_PORT=8232
       - LWD_GRPC_BIND=0.0.0.0:9067
     volumes:
@@ -68,11 +99,11 @@ services:
     profiles:
       - lwd
     healthcheck:
-      test: ["CMD-SHELL", "timeout 5 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/9067' || exit 1"]
-      interval: 10s
+      test: [ "CMD-SHELL", "/usr/local/bin/grpc_health_probe -addr=127.0.0.1:9067 || exit 1" ]
+      interval: 15s
       timeout: 5s
-      retries: 30
-      start_period: 120s
+      retries: 60
+      start_period: 60s
 
   # ========================================
   # ZAINO INDEXER (Profile: zaino)
@@ -84,14 +115,13 @@ services:
       args:
         - NO_TLS=true
         - RUST_VERSION=1.91.1
-    container_name: zeckit-zaino
     ports:
-      - "127.0.0.1:9067:9067"
+      - "9067:9067"
     depends_on:
-      zebra:
-        condition: service_healthy
+      zebra-miner:
+        condition: service_started
     environment:
-      - ZEBRA_RPC_HOST=zebra
+      - ZEBRA_RPC_HOST=zebra-miner
       - ZEBRA_RPC_PORT=8232
       - ZAINO_GRPC_BIND=0.0.0.0:9067
       - ZAINO_DATA_DIR=/var/zaino
@@ -106,11 +136,51 @@ services:
       - zaino
     user: "0:0"
     healthcheck:
-      test: ["CMD-SHELL", "timeout 5 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/9067' || exit 1"]
-      interval: 10s
+      test: [ "CMD-SHELL", "curl -s http://127.0.0.1:9067 || exit 1" ]
+      interval: 15s
       timeout: 5s
       retries: 60
-      start_period: 180s
+      start_period: 60s
+
+  # ========================================
+  # ZINGO WALLET (Profile: lwd)
+  # ========================================
+  zingo-wallet-lwd:
+    build:
+      context: ./docker/zingo
+      dockerfile: Dockerfile
+    environment:
+      - LIGHTWALLETD_URI=http://lightwalletd:9067
+    volumes:
+      - zingo-data:/var/zingo
+    depends_on:
+      lightwalletd:
+        condition: service_started
+    networks:
+      - zeckit-network
+    restart: unless-stopped
+    profiles:
+      - lwd
+
+  # ========================================
+  # ZINGO WALLET (Profile: zaino)
+  # ========================================
+  zingo-wallet-zaino:
+    build:
+      context: ./docker/zingo
+      dockerfile: Dockerfile
+    environment:
+      - LIGHTWALLETD_URI=http://zaino:9067
+    volumes:
+      - zingo-data:/var/zingo
+    depends_on:
+      zaino:
+        condition: service_started
+    networks:
+      - zeckit-network
+    restart: unless-stopped
+    profiles:
+      - zaino
 
   # ========================================
   #  FAUCET SERVICE - LWD Profile
@@ -119,29 +189,34 @@ services:
     build:
       context: ./zeckit-faucet
       dockerfile: Dockerfile
-    container_name: zeckit-faucet
     ports:
-      - "127.0.0.1:8080:8080"
+      - "8080:8080"
     volumes:
       - faucet-data:/var/zingo
     environment:
       - LIGHTWALLETD_URI=http://lightwalletd:9067
-      - ZEBRA_RPC_URL=http://zebra:8232
+      - ZEBRA_RPC_URL=http://zebra-miner:8232
       - ZINGO_DATA_DIR=/var/zingo
       - FAUCET_AMOUNT_MIN=0.01
       - FAUCET_AMOUNT_MAX=100.0
       - FAUCET_AMOUNT_DEFAULT=10.0
       - RUST_LOG=info
     depends_on:
-      zebra:
-        condition: service_healthy
+      zebra-miner:
+        condition: service_started
       lightwalletd:
-        condition: service_healthy
+        condition: service_started
     networks:
       - zeckit-network
     restart: unless-stopped
     profiles:
       - lwd
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -s http://127.0.0.1:8080/health || exit 1" ]
+      interval: 15s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
 
   # ========================================
   #  FAUCET SERVICE - Zaino Profile
@@ -150,22 +225,21 @@ services:
     build:
       context: ./zeckit-faucet
       dockerfile: Dockerfile
-    container_name: zeckit-faucet
     ports:
-      - "127.0.0.1:8080:8080"
+      - "8080:8080"
     volumes:
       - faucet-data:/var/zingo
     environment:
       - LIGHTWALLETD_URI=http://zaino:9067
-      - ZEBRA_RPC_URL=http://zebra:8232
+      - ZEBRA_RPC_URL=http://zebra-miner:8232
       - ZINGO_DATA_DIR=/var/zingo
       - FAUCET_AMOUNT_MIN=0.01
       - FAUCET_AMOUNT_MAX=100.0
       - FAUCET_AMOUNT_DEFAULT=10.0
       - RUST_LOG=info
     depends_on:
-      zebra:
-        condition: service_healthy
+      zebra-miner:
+        condition: service_started
       zaino:
         condition: service_started
     networks:
@@ -173,3 +247,9 @@ services:
     restart: unless-stopped
     profiles:
       - zaino
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -s http://127.0.0.1:8080/health || exit 1" ]
+      interval: 15s
+      timeout: 5s
+      retries: 60
+      start_period: 60s

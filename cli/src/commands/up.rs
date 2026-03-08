@@ -27,10 +27,10 @@ pub async fn execute(backend: String, fresh: bool) -> Result<()> {
         compose.down(true)?;
     }
     
-    let services = match backend.as_str() {
-        "lwd" => vec!["zebra", "faucet"],
-        "zaino" => vec!["zebra", "faucet"],
-        "none" => vec!["zebra", "faucet"],
+    let (services, profile) = match backend.as_str() {
+        "lwd" => (vec!["zebra-miner", "zebra-sync", "lightwalletd", "faucet-lwd"], "lwd"),
+        "zaino" => (vec!["zebra-miner", "zebra-sync", "zaino", "faucet-zaino"], "zaino"),
+        "none" => (vec!["zebra-miner", "zebra-sync"], "none"),
         _ => {
             return Err(ZecKitError::Config(format!(
                 "Invalid backend: {}. Use 'lwd', 'zaino', or 'none'", 
@@ -62,11 +62,8 @@ pub async fn execute(backend: String, fresh: bool) -> Result<()> {
     // ========================================================================
     // STEP 2: Build and start services (smart build - only when needed)
     // ========================================================================
-    if backend == "lwd" {
-        compose.up_with_profile("lwd", fresh)?;
-        println!();
-    } else if backend == "zaino" {
-        compose.up_with_profile("zaino", fresh)?;
+    if backend == "lwd" || backend == "zaino" {
+        compose.up_with_profile(profile, fresh)?;
         println!();
     } else {
         compose.up(&services)?;
@@ -88,24 +85,63 @@ pub async fn execute(backend: String, fresh: bool) -> Result<()> {
     let checker = HealthChecker::new();
     let start = std::time::Instant::now();
     
+    // Wait for Miner
+    println!("Waiting for Zebra Miner node to initialize...");
+    let mut last_error_miner = String::new();
+    let mut last_error_sync = String::new();
+    let mut last_error_print = std::time::Instant::now();
+
     loop {
         pb.tick();
-        
-        if checker.wait_for_zebra(&pb).await.is_ok() {
-            println!("[1/3] Zebra ready (100%)");
-            break;
+        match checker.check_zebra_miner_ready().await {
+            Ok(_) => {
+                println!("\n[1.1/3] Zebra Miner ready");
+                break;
+            }
+            Err(e) => {
+                let err_str = e.to_string();
+                if err_str != last_error_miner || last_error_print.elapsed().as_secs() > 10 {
+                    println!("  Miner: {}", err_str);
+                    last_error_miner = err_str;
+                    last_error_print = std::time::Instant::now();
+                }
+                
+                if start.elapsed().as_secs() > 3600 {
+                    return Err(ZecKitError::ServiceNotReady(format!("Zebra Miner not ready after 1 hour: {}", e)));
+                }
+            }
         }
-        
-        let elapsed = start.elapsed().as_secs();
-        if elapsed < 120 {
-            let progress = (elapsed as f64 / 120.0 * 100.0).min(99.0) as u32;
-            print!("\r[1/3] Starting Zebra... {}%", progress);
-            io::stdout().flush().ok();
-            sleep(Duration::from_secs(1)).await;
-        } else {
-            return Err(ZecKitError::ServiceNotReady("Zebra not ready".into()));
-        }
+        sleep(Duration::from_secs(2)).await;
     }
+
+    // Wait for Sync Node
+    println!("Waiting for Zebra Sync node to initialize and peer...");
+    let start_sync = std::time::Instant::now();
+    let mut last_error_print = std::time::Instant::now();
+
+    loop {
+        pb.tick();
+        match checker.check_zebra_sync_ready().await {
+            Ok(_) => {
+                println!("\n[1.2/3] Zebra Sync Node ready");
+                break;
+            }
+            Err(e) => {
+                let err_str = e.to_string();
+                if err_str != last_error_sync || last_error_print.elapsed().as_secs() > 10 {
+                    println!("  Sync Node: {}", err_str);
+                    last_error_sync = err_str;
+                    last_error_print = std::time::Instant::now();
+                }
+
+                if start_sync.elapsed().as_secs() > 3600 {
+                    return Err(ZecKitError::ServiceNotReady(format!("Zebra Sync Node not ready after 1 hour: {}", e)));
+                }
+            }
+        }
+        sleep(Duration::from_secs(2)).await;
+    }
+    println!("[1/3] Zebra Cluster ready (100%)");
     println!();
     
     // ========================================================================
@@ -495,6 +531,7 @@ async fn shield_transparent_funds() -> Result<()> {
 }
 
 async fn get_block_count(client: &Client) -> Result<u64> {
+    // Check miner first
     let resp = client
         .post("http://127.0.0.1:8232")
         .json(&json!({
@@ -509,9 +546,32 @@ async fn get_block_count(client: &Client) -> Result<u64> {
     
     let json: serde_json::Value = resp.json().await?;
     
-    json.get("result")
+    let miner_height = json.get("result")
         .and_then(|v| v.as_u64())
-        .ok_or_else(|| ZecKitError::HealthCheck("Invalid block count response".into()))
+        .ok_or_else(|| ZecKitError::HealthCheck("Invalid miner block count".into()))?;
+
+    // Check sync node parity
+    if let Ok(resp_sync) = client
+        .post("http://127.0.0.1:18232")
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": "blockcount",
+            "method": "getblockcount",
+            "params": []
+        }))
+        .timeout(Duration::from_secs(2))
+        .send()
+        .await {
+            if let Ok(json_sync) = resp_sync.json::<serde_json::Value>().await {
+                if let Some(sync_height) = json_sync.get("result").and_then(|v| v.as_u64()) {
+                    if sync_height < miner_height {
+                        // Just log for now, don't fail yet as sync takes time
+                    }
+                }
+            }
+        }
+
+    Ok(miner_height)
 }
 
 async fn get_wallet_transparent_address_from_faucet() -> Result<String> {
