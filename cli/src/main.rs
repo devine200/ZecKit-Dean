@@ -13,6 +13,10 @@ mod utils;
 #[command(about = "ZecKit - Developer toolkit for Zcash on Zebra", long_about = None)]
 #[command(version)]
 struct Cli {
+    /// Path to the ZecKit project root (overrides auto-detection)
+    #[arg(long, global = true)]
+    project_dir: Option<String>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -70,16 +74,16 @@ async fn main() {
     
     let result = match cli.command {
         Commands::Up { backend, fresh, timeout, action_mode } => {
-            commands::up::execute(backend, fresh, timeout, action_mode).await
+            commands::up::execute(backend, fresh, timeout, action_mode, cli.project_dir).await
         }
         Commands::Down { purge } => {
-            commands::down::execute(purge).await
+            commands::down::execute(purge, cli.project_dir).await
         }
         Commands::Status => {
-            commands::status::execute().await
+            commands::status::execute(cli.project_dir).await
         }
         Commands::Test { amount, memo, action_mode } => {
-            commands::test::execute(amount, memo, action_mode).await
+            commands::test::execute(amount, memo, action_mode, cli.project_dir).await
         }
     };
     

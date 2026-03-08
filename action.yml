@@ -69,16 +69,15 @@ runs:
     - name: Run E2E Suite
       id: e2e
       shell: bash
-      working-directory: ${{ github.action_path }}
       run: |
         # Run the devnet
-        ./cli/target/release/zeckit up \
+        ./cli/target/release/zeckit --project-dir "${{ github.action_path }}" up \
           --backend "${{ inputs.backend }}" \
           --timeout "${{ inputs.startup_timeout_minutes }}" \
           --action-mode
         
         # Run the tests
-        ./cli/target/release/zeckit test \
+        ./cli/target/release/zeckit --project-dir "${{ github.action_path }}" test \
           --amount "${{ inputs.send_amount }}" \
           --memo "${{ inputs.send_memo }}" \
           --action-mode

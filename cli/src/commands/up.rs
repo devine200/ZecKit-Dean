@@ -14,13 +14,13 @@ const MAX_WAIT_SECONDS: u64 = 60000;
 // Known transparent address from default seed "abandon abandon abandon..."
 const DEFAULT_FAUCET_ADDRESS: &str = "tmBsTi2xWTjUdEXnuTceL7fecEQKeWaPDJd";
 
-pub async fn execute(backend: String, fresh: bool, timeout: u64, action_mode: bool) -> Result<()> {
+pub async fn execute(backend: String, fresh: bool, timeout: u64, action_mode: bool, project_dir: Option<String>) -> Result<()> {
     println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
     println!("{}", "  ZecKit - Starting Devnet".cyan().bold());
     println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
     println!();
     
-    let compose = DockerCompose::new()?;
+    let compose = DockerCompose::new(project_dir.clone())?;
     
     if fresh {
         println!("{}", "🧹 Cleaning up old data (fresh start)...".yellow());
@@ -47,7 +47,7 @@ pub async fn execute(backend: String, fresh: bool, timeout: u64, action_mode: bo
     // ========================================================================
     println!("📝 Configuring Zebra mining address...");
     
-    match update_zebra_config_file(DEFAULT_FAUCET_ADDRESS) {
+    match update_zebra_config_file(DEFAULT_FAUCET_ADDRESS, project_dir.clone()) {
         Ok(_) => {
             println!("✓ Updated docker/configs/zebra.toml");
             println!("  Mining to: {}", DEFAULT_FAUCET_ADDRESS);
@@ -107,7 +107,7 @@ pub async fn execute(backend: String, fresh: bool, timeout: u64, action_mode: bo
                 }
                 
                 if start.elapsed().as_secs() > timeout * 60 {
-                    let _ = save_faucet_stats_artifact(action_mode).await;
+                    let _ = save_faucet_stats_artifact(action_mode, project_dir.clone()).await;
                     return Err(ZecKitError::ServiceNotReady(format!("Zebra Miner not ready after {} minutes: {}", timeout, e)));
                 }
             }
@@ -136,7 +136,7 @@ pub async fn execute(backend: String, fresh: bool, timeout: u64, action_mode: bo
                 }
 
                 if start_sync.elapsed().as_secs() > timeout * 60 {
-                    let _ = save_faucet_stats_artifact(action_mode).await;
+                    let _ = save_faucet_stats_artifact(action_mode, project_dir.clone()).await;
                     return Err(ZecKitError::ServiceNotReady(format!("Zebra Sync Node not ready after {} minutes: {}", timeout, e)));
                 }
             }
@@ -369,28 +369,40 @@ pub async fn execute(backend: String, fresh: bool, timeout: u64, action_mode: bo
     
     // Save artifacts if in action mode
     if action_mode {
-        let _ = save_faucet_stats_artifact(action_mode).await;
+        let _ = save_faucet_stats_artifact(action_mode, project_dir.clone()).await;
     }
     
     Ok(())
 }
 
-async fn save_faucet_stats_artifact(action_mode: bool) -> Result<()> {
+async fn save_faucet_stats_artifact(action_mode: bool, project_dir_override: Option<String>) -> Result<()> {
     if !action_mode {
         return Ok(());
     }
 
-    println!("📊 Saving faucet stats artifact...");
-    fs::create_dir_all("logs").ok();
+    let project_dir = if let Some(dir) = project_dir_override {
+        std::path::PathBuf::from(dir)
+    } else {
+        let current_dir = std::env::current_dir()?;
+        if current_dir.ends_with("cli") {
+            current_dir.parent().unwrap().to_path_buf()
+        } else {
+            current_dir
+        }
+    };
+
+    let log_dir = project_dir.join("logs");
+    fs::create_dir_all(&log_dir).ok();
     
     match Client::new().get("http://127.0.0.1:8080/stats").send().await {
         Ok(resp) => {
             if let Ok(json) = resp.json::<serde_json::Value>().await {
+                let stats_path = log_dir.join("faucet-stats.json");
                 fs::write(
-                    "logs/faucet-stats.json",
+                    &stats_path,
                     serde_json::to_string_pretty(&json)?
                 ).ok();
-                println!("✓ Saved logs/faucet-stats.json");
+                println!("✓ Saved {:?}", stats_path);
             }
         }
         Err(e) => println!("  Warning: Could not get faucet stats for artifact: {}", e),
@@ -403,15 +415,19 @@ async fn save_faucet_stats_artifact(action_mode: bool) -> Result<()> {
 // ============================================================================
 // NEW FUNCTION: Update zebra.toml on host before starting containers
 // ============================================================================
-fn update_zebra_config_file(address: &str) -> Result<()> {
+fn update_zebra_config_file(address: &str, project_dir_override: Option<String>) -> Result<()> {
     use regex::Regex;
     
-    // Get project root (same logic as DockerCompose::new())
-    let current_dir = std::env::current_dir()?;
-    let project_dir = if current_dir.ends_with("cli") {
-        current_dir.parent().unwrap().to_path_buf()
+    // Get project root
+    let project_dir = if let Some(dir) = project_dir_override {
+        std::path::PathBuf::from(dir)
     } else {
-        current_dir.clone()
+        let current_dir = std::env::current_dir()?;
+        if current_dir.ends_with("cli") {
+            current_dir.parent().unwrap().to_path_buf()
+        } else {
+            current_dir
+        }
     };
     
     let config_path = project_dir.join("docker/configs/zebra.toml");

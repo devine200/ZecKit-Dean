@@ -6,7 +6,7 @@ use tokio::time::{sleep, Duration};
 use std::fs;
 use chrono;
 
-pub async fn execute(amount: f64, memo: String, action_mode: bool) -> Result<()> {
+pub async fn execute(amount: f64, memo: String, action_mode: bool, project_dir: Option<String>) -> Result<()> {
     println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
     println!("{}", "  ZecKit - Running Smoke Tests".cyan().bold());
     println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
@@ -128,7 +128,8 @@ pub async fn execute(amount: f64, memo: String, action_mode: bool) -> Result<()>
             shield_txid,
             send_txid,
             final_balance.map(|b| b.orchard).unwrap_or(0.0),
-            if failed == 0 { "pass" } else { "fail" }
+            if failed == 0 { "pass" } else { "fail" },
+            project_dir.clone(),
         ).await;
     }
 
@@ -148,13 +149,25 @@ async fn save_run_summary_artifact(
     send_txid: String,
     final_balance: f64,
     test_result: &str,
+    project_dir_override: Option<String>,
 ) -> Result<()> {
     if !action_mode {
         return Ok(());
     }
 
-    println!("📊 Saving run summary artifact...");
-    fs::create_dir_all("logs").ok();
+    let project_dir = if let Some(dir) = project_dir_override {
+        std::path::PathBuf::from(dir)
+    } else {
+        let current_dir = std::env::current_dir()?;
+        if current_dir.ends_with("cli") {
+            current_dir.parent().unwrap().to_path_buf()
+        } else {
+            current_dir
+        }
+    };
+
+    let log_dir = project_dir.join("logs");
+    fs::create_dir_all(&log_dir).ok();
 
     let summary = json!({
         "faucet_address": faucet_address,
@@ -165,11 +178,12 @@ async fn save_run_summary_artifact(
         "timestamp": chrono::Utc::now().to_rfc3339(),
     });
 
+    let summary_path = log_dir.join("run-summary.json");
     fs::write(
-        "logs/run-summary.json",
+        &summary_path,
         serde_json::to_string_pretty(&summary)?
     ).ok();
-    println!("✓ Saved logs/run-summary.json");
+    println!("✓ Saved {:?}", summary_path);
 
     Ok(())
 }
