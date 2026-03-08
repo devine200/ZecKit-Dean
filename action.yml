@@ -1,0 +1,105 @@
+name: 'ZecKit E2E'
+description: 'Standardized Zcash E2E test suite for GitHub CI'
+
+inputs:
+  backend:
+    description: "Light-client backend: 'lwd' or 'zaino'"
+    required: false
+    default: 'zaino'
+  startup_timeout_minutes:
+    description: 'Minutes to wait for Zebra + Backend to reach health'
+    required: false
+    default: '10'
+  block_wait_seconds:
+    description: 'Seconds to wait after mining for propagation'
+    required: false
+    default: '75'
+  send_amount:
+    description: 'Amount in ZEC for the E2E golden flow transaction'
+    required: false
+    default: '0.05'
+  send_memo:
+    description: 'Memo string for the E2E golden flow transaction'
+    required: false
+    default: 'ZecKit E2E Transaction'
+  upload_artifacts:
+    description: "Artifact upload policy: 'always' | 'on-failure' | 'never'"
+    required: false
+    default: 'on-failure'
+  ghcr_token:
+    description: 'GitHub token for pulling/pushing images'
+    required: false
+  image_prefix:
+    description: 'Custom prefix for docker images (if using local fork)'
+    required: false
+    default: 'ghcr.io/zecdev/zeckit'
+
+outputs:
+  unified_address:
+    description: "Faucet's Unified Address"
+    value: ${{ steps.e2e.outputs.unified_address }}
+  shield_txid:
+    description: 'TXID of the transparent-to-shielded transaction'
+    value: ${{ steps.e2e.outputs.shield_txid }}
+  send_txid:
+    description: 'TXID of the E2E golden flow send'
+    value: ${{ steps.e2e.outputs.send_txid }}
+  final_orchard_balance:
+    description: 'Final Orchard balance of the faucet wallet'
+    value: ${{ steps.e2e.outputs.final_orchard_balance }}
+  test_result:
+    description: "Outcome of the E2E run: 'pass' | 'fail'"
+    value: ${{ steps.e2e.outputs.test_result }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up environment
+      shell: bash
+      run: |
+        echo "Starting ZecKit E2E Action..."
+        echo "Backend: ${{ inputs.backend }}"
+        
+    - name: Build ZecKit CLI
+      shell: bash
+      run: |
+        cd ${{ github.action_path }}/cli
+        cargo build --release
+        cp target/release/zeckit ${{ github.workspace }}/zeckit
+      
+    - name: Run E2E Suite
+      id: e2e
+      shell: bash
+      run: |
+        # Run the devnet
+        ./zeckit up \
+          --backend "${{ inputs.backend }}" \
+          --timeout "${{ inputs.startup_timeout_minutes }}" \
+          --action-mode
+        
+        # Run the tests
+        ./zeckit test \
+          --amount "${{ inputs.send_amount }}" \
+          --memo "${{ inputs.send_memo }}" \
+          --action-mode
+        
+        # Extract metadata from logs if exists
+        if [ -f logs/run-summary.json ]; then
+           echo "unified_address=$(jq -r .faucet_address logs/run-summary.json)" >> $GITHUB_OUTPUT
+           echo "shield_txid=$(jq -r .shield_txid logs/run-summary.json)" >> $GITHUB_OUTPUT
+           echo "send_txid=$(jq -r .send_txid logs/run-summary.json)" >> $GITHUB_OUTPUT
+           echo "final_orchard_balance=$(jq -r .final_balance logs/run-summary.json)" >> $GITHUB_OUTPUT
+           echo "test_result=$(jq -r .test_result logs/run-summary.json)" >> $GITHUB_OUTPUT
+        else
+           echo "test_result=fail" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Upload Artifacts
+      if: |
+        (inputs.upload_artifacts == 'always') ||
+        (inputs.upload_artifacts == 'on-failure' && steps.e2e.outputs.test_result != 'pass')
+      uses: actions/upload-artifact@v4
+      with:
+        name: zeckit-e2e-logs-${{ github.run_number }}
+        path: logs/
+        retention-days: 14

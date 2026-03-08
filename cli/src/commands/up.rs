@@ -14,7 +14,7 @@ const MAX_WAIT_SECONDS: u64 = 60000;
 // Known transparent address from default seed "abandon abandon abandon..."
 const DEFAULT_FAUCET_ADDRESS: &str = "tmBsTi2xWTjUdEXnuTceL7fecEQKeWaPDJd";
 
-pub async fn execute(backend: String, fresh: bool) -> Result<()> {
+pub async fn execute(backend: String, fresh: bool, timeout: u64, action_mode: bool) -> Result<()> {
     println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
     println!("{}", "  ZecKit - Starting Devnet".cyan().bold());
     println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
@@ -106,8 +106,9 @@ pub async fn execute(backend: String, fresh: bool) -> Result<()> {
                     last_error_print = std::time::Instant::now();
                 }
                 
-                if start.elapsed().as_secs() > 3600 {
-                    return Err(ZecKitError::ServiceNotReady(format!("Zebra Miner not ready after 1 hour: {}", e)));
+                if start.elapsed().as_secs() > timeout * 60 {
+                    let _ = save_faucet_stats_artifact(action_mode).await;
+                    return Err(ZecKitError::ServiceNotReady(format!("Zebra Miner not ready after {} minutes: {}", timeout, e)));
                 }
             }
         }
@@ -134,8 +135,9 @@ pub async fn execute(backend: String, fresh: bool) -> Result<()> {
                     last_error_print = std::time::Instant::now();
                 }
 
-                if start_sync.elapsed().as_secs() > 3600 {
-                    return Err(ZecKitError::ServiceNotReady(format!("Zebra Sync Node not ready after 1 hour: {}", e)));
+                if start_sync.elapsed().as_secs() > timeout * 60 {
+                    let _ = save_faucet_stats_artifact(action_mode).await;
+                    return Err(ZecKitError::ServiceNotReady(format!("Zebra Sync Node not ready after {} minutes: {}", timeout, e)));
                 }
             }
         }
@@ -365,8 +367,38 @@ pub async fn execute(backend: String, fresh: bool) -> Result<()> {
     println!("{}", "   New blocks will be mined every 15 seconds".green());
     println!("{}", "   Press Ctrl+C to stop".green());
     
+    // Save artifacts if in action mode
+    if action_mode {
+        let _ = save_faucet_stats_artifact(action_mode).await;
+    }
+    
     Ok(())
 }
+
+async fn save_faucet_stats_artifact(action_mode: bool) -> Result<()> {
+    if !action_mode {
+        return Ok(());
+    }
+
+    println!("📊 Saving faucet stats artifact...");
+    fs::create_dir_all("logs").ok();
+    
+    match Client::new().get("http://127.0.0.1:8080/stats").send().await {
+        Ok(resp) => {
+            if let Ok(json) = resp.json::<serde_json::Value>().await {
+                fs::write(
+                    "logs/faucet-stats.json",
+                    serde_json::to_string_pretty(&json)?
+                ).ok();
+                println!("✓ Saved logs/faucet-stats.json");
+            }
+        }
+        Err(e) => println!("  Warning: Could not get faucet stats for artifact: {}", e),
+    }
+
+    Ok(())
+}
+
 
 // ============================================================================
 // NEW FUNCTION: Update zebra.toml on host before starting containers

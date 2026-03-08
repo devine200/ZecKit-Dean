@@ -28,6 +28,14 @@ enum Commands {
         /// Force fresh start (remove volumes)
         #[arg(short, long)]
         fresh: bool,
+
+        /// Startup timeout in minutes
+        #[arg(long, default_value = "10")]
+        timeout: u64,
+
+        /// Run in action mode (generate artifacts)
+        #[arg(long)]
+        action_mode: bool,
     },
     
     /// Stop the ZecKit devnet
@@ -41,7 +49,19 @@ enum Commands {
     Status,
     
     /// Run smoke tests
-    Test,
+    Test {
+        /// Amount to send in E2E test
+        #[arg(long, default_value = "0.05")]
+        amount: f64,
+
+        /// Memo to use for E2E test
+        #[arg(long, default_value = "ZecKit E2E Transaction")]
+        memo: String,
+
+        /// Run in action mode (generate artifacts)
+        #[arg(long)]
+        action_mode: bool,
+    },
 }
 
 #[tokio::main]
@@ -49,8 +69,8 @@ async fn main() {
     let cli = Cli::parse();
     
     let result = match cli.command {
-        Commands::Up { backend, fresh } => {
-            commands::up::execute(backend, fresh).await
+        Commands::Up { backend, fresh, timeout, action_mode } => {
+            commands::up::execute(backend, fresh, timeout, action_mode).await
         }
         Commands::Down { purge } => {
             commands::down::execute(purge).await
@@ -58,8 +78,8 @@ async fn main() {
         Commands::Status => {
             commands::status::execute().await
         }
-        Commands::Test => {
-            commands::test::execute().await
+        Commands::Test { amount, memo, action_mode } => {
+            commands::test::execute(amount, memo, action_mode).await
         }
     };
     
