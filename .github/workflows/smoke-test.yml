@@ -37,9 +37,11 @@ jobs:
           docker system prune -f || true
       
       - name: Start zeckit devnet
-        env:
-          IMAGE_PREFIX: ghcr.io/${{ github.repository }}
         run: |
+          # Convert repo name to lowercase for GHCR as Docker requires lowercase image references
+          REPO="${{ github.repository }}"
+          export IMAGE_PREFIX="ghcr.io/${REPO,,}"
+          
           echo "Pulling pre-built Zebra images..."
           docker compose pull zebra-miner zebra-sync || true
           
