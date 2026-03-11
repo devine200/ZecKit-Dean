@@ -6,29 +6,36 @@ inputs:
     description: "Light-client backend: 'lwd' or 'zaino'"
     required: false
     default: 'zaino'
+
   startup_timeout_minutes:
     description: 'Minutes to wait for Zebra + Backend to reach health'
     required: false
     default: '10'
+
   block_wait_seconds:
     description: 'Seconds to wait after mining for propagation'
     required: false
     default: '75'
+
   send_amount:
     description: 'Amount in ZEC for the E2E golden flow transaction'
     required: false
     default: '0.05'
+
   send_memo:
     description: 'Memo string for the E2E golden flow transaction'
     required: false
     default: 'ZecKit E2E Transaction'
+
   upload_artifacts:
     description: "Artifact upload policy: 'always' | 'on-failure' | 'never'"
     required: false
     default: 'on-failure'
+
   ghcr_token:
     description: 'GitHub token for pulling/pushing images'
     required: false
+
   image_prefix:
     description: 'Custom prefix for docker images (if using local fork)'
     required: false
@@ -38,15 +45,19 @@ outputs:
   unified_address:
     description: "Faucet's Unified Address"
     value: ${{ steps.e2e.outputs.unified_address }}
+
   shield_txid:
     description: 'TXID of the transparent-to-shielded transaction'
     value: ${{ steps.e2e.outputs.shield_txid }}
+
   send_txid:
     description: 'TXID of the E2E golden flow send'
     value: ${{ steps.e2e.outputs.send_txid }}
+
   final_orchard_balance:
     description: 'Final Orchard balance of the faucet wallet'
     value: ${{ steps.e2e.outputs.final_orchard_balance }}
+
   test_result:
     description: "Outcome of the E2E run: 'pass' | 'fail'"
     value: ${{ steps.e2e.outputs.test_result }}
@@ -54,64 +65,124 @@ outputs:
 runs:
   using: "composite"
   steps:
+
     - name: Set up environment
       shell: bash
       run: |
         echo "Starting ZecKit E2E Action..."
         echo "Backend: ${{ inputs.backend }}"
-        
-    - name: Cache ZecKit CLI
-      uses: actions/cache@v4
-      with:
-        path: |
-          ${{ github.action_path }}/cli/target
-          ~/.cargo/registry
-          ~/.cargo/git
-        key: zeckit-cli-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          zeckit-cli-${{ runner.os }}-
+        echo "Action ref: ${{ github.action_ref }}"
 
-    - name: Build ZecKit CLI
+    # ----------------------------------------------------------
+    # Create bin directory (ephemeral, per-runner)
+    # ----------------------------------------------------------
+    - name: Create bin directory
+      shell: bash
+      run: mkdir -p "${{ github.action_path }}/bin"
+
+    # ----------------------------------------------------------
+    # Detect platform
+    # ----------------------------------------------------------
+    - name: Detect platform
+      id: platform
       shell: bash
       run: |
-        cd ${{ github.action_path }}/cli
-        cargo build
-      
+        if [[ "$RUNNER_OS" == "Linux" ]]; then
+          echo "binary=zeckit-linux-x86_64" >> $GITHUB_OUTPUT
+        elif [[ "$RUNNER_OS" == "macOS" ]]; then
+          echo "binary=zeckit-macos-x86_64" >> $GITHUB_OUTPUT
+        else
+          echo "Unsupported OS: $RUNNER_OS"
+          exit 1
+        fi
+
+    # ----------------------------------------------------------
+    # Download version-pinned binary
+    # ----------------------------------------------------------
+    - name: Download ZecKit CLI binary
+      shell: bash
+      run: |
+        VERSION="${{ github.action_ref }}"
+        BINARY="${{ steps.platform.outputs.binary }}"
+        BASE="https://github.com/zecdev/ZecKit/releases"
+
+        if [[ -z "$VERSION" ]]; then
+          VERSION="latest"
+        fi
+
+        echo "Downloading ZecKit CLI version: $VERSION"
+        echo "Binary: $BINARY"
+
+        if [[ "$VERSION" == "latest" ]]; then
+          curl -L -o "${{ github.action_path }}/bin/$BINARY" \
+            "$BASE/latest/download/$BINARY"
+
+          curl -L -o "${{ github.action_path }}/bin/$BINARY.sha256" \
+            "$BASE/latest/download/$BINARY.sha256"
+        else
+          curl -L -o "${{ github.action_path }}/bin/$BINARY" \
+            "$BASE/download/$VERSION/$BINARY"
+
+          curl -L -o "${{ github.action_path }}/bin/$BINARY.sha256" \
+            "$BASE/download/$VERSION/$BINARY.sha256"
+        fi
+
+    # ----------------------------------------------------------
+    # Verify checksum (supply-chain protection)
+    # ----------------------------------------------------------
+    - name: Verify checksum
+      shell: bash
+      run: |
+        cd "${{ github.action_path }}/bin"
+        sha256sum -c "${{ steps.platform.outputs.binary }}.sha256"
+
+    - name: Make executable
+      shell: bash
+      run: |
+        chmod +x "${{ github.action_path }}/bin/${{ steps.platform.outputs.binary }}"
+
+    # ----------------------------------------------------------
+    # Login to GHCR (if token provided)
+    # ----------------------------------------------------------
     - name: Registry Login
       if: inputs.ghcr_token != ''
       shell: bash
       run: |
         echo "${{ inputs.ghcr_token }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
+    # ----------------------------------------------------------
+    # Pull pre-built images
+    # ----------------------------------------------------------
     - name: Pull pre-built images
       shell: bash
       run: |
         export IMAGE_PREFIX="${{ inputs.image_prefix }}"
-        if [ "${{ inputs.backend }}" != "none" ]; then
-          docker compose -f "${{ github.action_path }}/docker-compose.yml" --profile "${{ inputs.backend }}" pull
-        else
-          docker compose -f "${{ github.action_path }}/docker-compose.yml" pull
-        fi
+        docker compose -f "${{ github.action_path }}/docker-compose.yml" pull || true
 
+    # ----------------------------------------------------------
+    # Run E2E Suite
+    # ----------------------------------------------------------
     - name: Run E2E Suite
       id: e2e
       shell: bash
       env:
         IMAGE_PREFIX: ${{ inputs.image_prefix }}
       run: |
-        # Run the devnet
-        "${{ github.action_path }}/cli/target/debug/zeckit" --project-dir "${{ github.action_path }}" up \
+        CLI="${{ github.action_path }}/bin/${{ steps.platform.outputs.binary }}"
+
+        # Start devnet
+        "$CLI" --project-dir "${{ github.action_path }}" up \
           --backend "${{ inputs.backend }}" \
           --timeout "${{ inputs.startup_timeout_minutes }}" \
           --action-mode
-        
-        # Run the tests
-        "${{ github.action_path }}/cli/target/debug/zeckit" --project-dir "${{ github.action_path }}" test \
+
+        # Run tests
+        "$CLI" --project-dir "${{ github.action_path }}" test \
           --amount "${{ inputs.send_amount }}" \
           --memo "${{ inputs.send_memo }}" \
           --action-mode
-        
-        # Extract metadata from logs if exists
+
+        # Extract metadata
         if [ -f logs/run-summary.json ]; then
            echo "unified_address=$(jq -r .faucet_address logs/run-summary.json)" >> $GITHUB_OUTPUT
            echo "shield_txid=$(jq -r .shield_txid logs/run-summary.json)" >> $GITHUB_OUTPUT
@@ -122,10 +193,15 @@ runs:
            echo "test_result=fail" >> $GITHUB_OUTPUT
         fi
 
+    # ----------------------------------------------------------
+    # Upload logs conditionally
+    # ----------------------------------------------------------
     - name: Upload Artifacts
       if: |
         always() &&
-        (inputs.upload_artifacts == 'always' || (inputs.upload_artifacts == 'on-failure' && steps.e2e.outputs.test_result != 'pass'))
+        (inputs.upload_artifacts == 'always' ||
+         (inputs.upload_artifacts == 'on-failure' &&
+          steps.e2e.outputs.test_result != 'pass'))
       uses: actions/upload-artifact@v4
       with:
         name: zeckit-e2e-logs-${{ inputs.backend }}-${{ github.run_number }}
