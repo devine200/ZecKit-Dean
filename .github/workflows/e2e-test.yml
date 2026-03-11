@@ -38,7 +38,10 @@ jobs:
           mkdir -p bin
 
           REPO="${{ github.repository }}"
-          TAG="v3.0.5"
+          REF="${{ github.event.workflow_run.ref }}"
+          TAG="${REF#refs/tags/}"
+
+          echo "Resolved tag: $TAG"
 
           echo "Downloading ${TAG} from ${REPO}"
 
