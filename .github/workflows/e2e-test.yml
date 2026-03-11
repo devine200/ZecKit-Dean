@@ -37,23 +37,11 @@ jobs:
 
           mkdir -p bin
 
-          REPO="${{ github.repository }}"
-          REF="${{ github.event.workflow_run.ref }}"
-
-          # Extract tag name from refs/tags/vX.Y.Z
-          TAG="${REF#refs/tags/}"
-
-          echo "REF: $REF"
-          echo "TAG: $TAG"
-          echo "REPO: $REPO"
-
-          echo "Downloading version: ${TAG}"
-
           curl -fL -o bin/zeckit \
-            "https://github.com/${REPO}/releases/download/${TAG}/zeckit-linux-x86_64"
+            "https://github.com/devine200/ZecKit-Dean/releases/download/v3.0.7/zeckit-linux-x86_64"
 
           curl -fL -o bin/zeckit.sha256 \
-            "https://github.com/${REPO}/releases/download/${TAG}/zeckit-linux-x86_64.sha256"
+            "https://github.com/devine200/ZecKit-Dean/releases/download/v3.0.7/zeckit-linux-x86_64.sha256"
 
           cd bin
           sha256sum -c zeckit-linux-x86_64.sha256
