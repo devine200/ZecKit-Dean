@@ -12,6 +12,10 @@ on:
         description: 'Version to test'
         required: true
         default: '0.1.0'
+      clean:
+        description: 'Start from scratch (wipe volumes)'
+        required: false
+        default: 'false'
 
 jobs:
   env:
