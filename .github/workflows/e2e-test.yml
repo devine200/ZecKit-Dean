@@ -16,7 +16,9 @@ on:
 jobs:
   e2e-tests:
     name: ZecKit E2E Test Suite
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
@@ -34,12 +36,13 @@ jobs:
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
           mkdir -p bin
+          REPO="${{ github.repository }}"
 
-          curl -L -o bin/zeckit \
-            https://github.com/zecdev/ZecKit/releases/latest/download/zeckit-linux-x86_64
+          curl -fL -o bin/zeckit \
+            "https://github.com/${REPO}/releases/latest/download/zeckit-linux-x86_64"
 
-          curl -L -o bin/zeckit.sha256 \
-            https://github.com/zecdev/ZecKit/releases/latest/download/zeckit-linux-x86_64.sha256
+          curl -fL -o bin/zeckit.sha256 \
+            "https://github.com/${REPO}/releases/latest/download/zeckit-linux-x86_64.sha256"
 
           cd bin
           sha256sum -c zeckit.sha256
