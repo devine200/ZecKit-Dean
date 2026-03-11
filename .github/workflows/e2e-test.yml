@@ -37,16 +37,56 @@ jobs:
 
           mkdir -p bin
 
-          curl -fL -o bin/zeckit \
-            "https://github.com/devine200/ZecKit-Dean/releases/download/v3.0.7/zeckit-linux-x86_64"
+          REPO="${{ github.repository }}"
+          TAG="v3.0.5"
 
-          curl -fL -o bin/zeckit.sha256 \
-            "https://github.com/devine200/ZecKit-Dean/releases/download/v3.0.7/zeckit-linux-x86_64.sha256"
+          echo "Downloading ${TAG} from ${REPO}"
+
+          # Install jq (safe guard)
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+
+          # Get release JSON
+          RELEASE_JSON=$(curl -s \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${REPO}/releases/tags/${TAG})
+
+          # Get binary asset ID
+          BIN_ASSET_ID=$(echo "$RELEASE_JSON" | jq -r \
+            '.assets[] | select(.name=="zeckit-linux-x86_64") | .id')
+
+          # Get checksum asset ID
+          SHA_ASSET_ID=$(echo "$RELEASE_JSON" | jq -r \
+            '.assets[] | select(.name=="zeckit-linux-x86_64.sha256") | .id')
+
+          echo "Binary Asset ID: $BIN_ASSET_ID"
+          echo "Checksum Asset ID: $SHA_ASSET_ID"
+
+          # Download binary
+          curl -L \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/octet-stream" \
+            https://api.github.com/repos/${REPO}/releases/assets/${BIN_ASSET_ID} \
+            -o bin/zeckit-linux-x86_64
+
+          # Download checksum
+          curl -L \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/octet-stream" \
+            https://api.github.com/repos/${REPO}/releases/assets/${SHA_ASSET_ID} \
+            -o bin/zeckit-linux-x86_64.sha256
 
           cd bin
+
+          # Verify checksum
           sha256sum -c zeckit-linux-x86_64.sha256
+
+          # Make executable
           chmod +x zeckit-linux-x86_64
+
+          # Rename to zeckit
           mv zeckit-linux-x86_64 zeckit
+
           cd ..
 
           echo "✓ CLI downloaded and verified"
