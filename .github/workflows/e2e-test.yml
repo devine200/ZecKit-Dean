@@ -14,6 +14,11 @@ on:
         default: '0.1.0'
 
 jobs:
+  env:
+    runs-on: ubuntu-latest
+    env:
+      CLEAN_RUN: ${{ github.event.inputs.clean || 'false' }}
+      
   e2e-tests:
     name: ZecKit E2E Test Suite
     if: >
@@ -42,13 +47,6 @@ jobs:
           REPO="${{ github.repository }}"
 
           # Extract tag from workflow_run event
-          # if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-          #   TAG="${{ inputs.version }}"
-          # else
-          #   REF="${{ github.event.workflow_run.ref }}"
-          #   TAG="${REF#refs/tags/}"
-          # fi
-
           TAG="${{ github.event.workflow_run.head_branch }}"
 
           echo "Resolved tag: $TAG"
@@ -136,16 +134,24 @@ jobs:
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "  Cleaning Up Previous Runs"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          set -euo pipefail
 
-          docker compose down 2>/dev/null || true
+          echo "CLEAN_RUN = $CLEAN_RUN"
 
-          docker volume rm zeckit_zebra-data 2>/dev/null || true
-          docker volume rm zeckit_zebra-sync-data 2>/dev/null || true
-          docker volume rm zeckit_zaino-data 2>/dev/null || true
-          docker volume rm zeckit_lightwalletd-data 2>/dev/null || true
-          docker volume rm zeckit_faucet-data 2>/dev/null || true
-
-          docker compose down --remove-orphans 2>/dev/null || true
+          if [ "$CLEAN_RUN" = "true" ]; then
+            echo "Performing FULL clean..."
+            docker compose down -v --remove-orphans || true
+            docker volume rm zeckit_zebra-data 2>/dev/null || true
+            docker volume rm zeckit_zebra-sync-data 2>/dev/null || true
+            docker volume rm zeckit_zaino-data 2>/dev/null || true
+            docker volume rm zeckit_lightwalletd-data 2>/dev/null || true
+            docker volume rm zeckit_faucet-data 2>/dev/null || true
+            docker system prune -f || true
+          else
+            echo "Performing LIGHT clean (keeping volumes)..."
+            docker compose down --remove-orphans || true
+          fi
 
           echo "✓ Cleanup complete"
           echo ""
