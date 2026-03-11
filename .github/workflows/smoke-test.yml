@@ -22,18 +22,16 @@ permissions:
   packages: read
 
 jobs:
-  env:
+  
+  smoke-test:
+    name: Zebra Smoke Test
     runs-on: ubuntu-latest
     env:
       CLEAN_RUN: ${{ github.event.inputs.clean || 'false' }}
-
-  smoke-test:
-    name: Zebra Smoke Test
     if: >
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
-    runs-on: ubuntu-latest
-    
+      
     # Timeout after 20 minutes
     timeout-minutes: 20
     

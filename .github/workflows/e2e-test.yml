@@ -18,17 +18,15 @@ on:
         default: 'false'
 
 jobs:
-  env:
-    runs-on: ubuntu-latest
-    env:
-      CLEAN_RUN: ${{ github.event.inputs.clean || 'false' }}
-      
   e2e-tests:
     name: ZecKit E2E Test Suite
     if: >
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    env:
+      CLEAN_RUN: ${{ github.event.inputs.clean || 'false' }}
+  
     timeout-minutes: 120
 
     steps:
