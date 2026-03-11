@@ -31,6 +31,8 @@ jobs:
       # ----------------------------------------------------------
       - name: Download ZecKit CLI binary
         run: |
+          set -euo pipefail
+
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "  Downloading ZecKit CLI"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -38,29 +40,54 @@ jobs:
           mkdir -p bin
 
           REPO="${{ github.repository }}"
-          REF="${{ github.event.workflow_run.ref }}"
-          TAG="${REF#refs/tags/}"
+
+          # Extract tag from workflow_run event
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.version }}"
+          else
+            REF="${{ github.event.workflow_run.ref }}"
+            TAG="${REF#refs/tags/}"
+          fi
 
           echo "Resolved tag: $TAG"
+          echo "Repository: $REPO"
 
-          echo "Downloading ${TAG} from ${REPO}"
-
-          # Install jq (safe guard)
           sudo apt-get update -y
           sudo apt-get install -y jq
 
-          # Get release JSON
-          RELEASE_JSON=$(curl -s \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            https://api.github.com/repos/${REPO}/releases/tags/${TAG})
+          echo "Waiting for release $TAG to become available..."
 
-          # Get binary asset ID
+          for i in {1..30}; do
+            RESPONSE=$(curl -s \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              https://api.github.com/repos/${REPO}/releases/tags/${TAG})
+
+            if echo "$RESPONSE" | jq -e '.assets' >/dev/null 2>&1; then
+              echo "Release found."
+              RELEASE_JSON="$RESPONSE"
+              break
+            fi
+
+            echo "Release not ready yet... retrying in 10 seconds"
+            sleep 10
+          done
+
+          if [ -z "${RELEASE_JSON:-}" ]; then
+            echo "Release never became available."
+            exit 1
+          fi
+
+          # Extract asset IDs
           BIN_ASSET_ID=$(echo "$RELEASE_JSON" | jq -r \
             '.assets[] | select(.name=="zeckit-linux-x86_64") | .id')
 
-          # Get checksum asset ID
           SHA_ASSET_ID=$(echo "$RELEASE_JSON" | jq -r \
             '.assets[] | select(.name=="zeckit-linux-x86_64.sha256") | .id')
+
+          if [ -z "$BIN_ASSET_ID" ] || [ -z "$SHA_ASSET_ID" ]; then
+            echo "Required assets not found in release."
+            exit 1
+          fi
 
           echo "Binary Asset ID: $BIN_ASSET_ID"
           echo "Checksum Asset ID: $SHA_ASSET_ID"
@@ -81,13 +108,10 @@ jobs:
 
           cd bin
 
-          # Verify checksum
+          echo "Verifying checksum..."
           sha256sum -c zeckit-linux-x86_64.sha256
 
-          # Make executable
           chmod +x zeckit-linux-x86_64
-
-          # Rename to zeckit
           mv zeckit-linux-x86_64 zeckit
 
           cd ..
@@ -95,7 +119,7 @@ jobs:
           echo "✓ CLI downloaded and verified"
           ls -lh bin/zeckit
           echo ""
-
+          
       - name: Check environment
         run: |
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
