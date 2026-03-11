@@ -1,15 +1,17 @@
 name: Smoke Test
 
 on:
-  push:
-    branches:
-      - main
-      - m3-implementation
-  pull_request:
-    branches:
-      - main
-      - m3-implementation
-  workflow_dispatch:  # Allow manual triggers
+  workflow_run:
+    workflows: ["Build and Release ZecKit CLI"]
+    types:
+      - completed # Allow manual triggers
+
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to test'
+        required: true
+        default: '0.1.0'
 
 permissions:
   contents: read
@@ -18,6 +20,7 @@ permissions:
 jobs:
   smoke-test:
     name: Zebra Smoke Test
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     
     # Timeout after 20 minutes

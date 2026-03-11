@@ -1,19 +1,22 @@
 name: E2E Tests
 
 on:
-  push:
-    branches:
-      - main
-      - m3-implementation
-  pull_request:
-    branches:
-      - main
-      - m3-implementation
+  workflow_run:
+    workflows: ["Build and Release ZecKit CLI"]
+    types:
+      - completed
+
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to test'
+        required: true
+        default: '0.1.0'
 
 jobs:
   e2e-tests:
     name: ZecKit E2E Test Suite
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
 

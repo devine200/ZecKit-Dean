@@ -2,6 +2,8 @@ name: Build and Release ZecKit CLI
 
 on:
   push:
+    tags:
+      - 'v*'
     branches:
       - main
       - m3-implementation
@@ -9,6 +11,13 @@ on:
     branches:
       - main
       - m3-implementation
+      
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release'
+        required: true
+        default: '0.1.0'
 
 permissions:
   contents: write
