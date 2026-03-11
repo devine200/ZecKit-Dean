@@ -4,11 +4,11 @@ on:
   push:
     branches:
       - main
-      - develop
+      - m3-implementation
   pull_request:
     branches:
       - main
-      - develop
+      - m3-implementation
   workflow_dispatch:
 
 jobs:

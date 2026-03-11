@@ -14,12 +14,12 @@ on:
   push:
     branches:
       - main
-      - develop
+      - m3-implementation
       - 'release/**'
   pull_request:
     branches:
       - main
-      - develop
+      - m3-implementation
   workflow_dispatch:
     inputs:
       backend:
