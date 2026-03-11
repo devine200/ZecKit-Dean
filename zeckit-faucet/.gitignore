@@ -3,7 +3,7 @@ zcash-params/
 /target/
 **/*.rs.bk
 *.pdb
-Cargo.lock
+# Cargo.lock
 
 # IDE
 .vscode/
