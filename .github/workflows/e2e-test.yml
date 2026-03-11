@@ -38,7 +38,14 @@ jobs:
           mkdir -p bin
 
           REPO="${{ github.repository }}"
-          TAG="${{ github.event.workflow_run.head_branch }}"
+          REF="${{ github.event.workflow_run.ref }}"
+
+          # Extract tag name from refs/tags/vX.Y.Z
+          TAG="${REF#refs/tags/}"
+
+          echo "REF: $REF"
+          echo "TAG: $TAG"
+          echo "REPO: $REPO"
 
           echo "Downloading version: ${TAG}"
 
