@@ -36,17 +36,22 @@ jobs:
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
           mkdir -p bin
+
           REPO="${{ github.repository }}"
+          TAG="${{ github.event.workflow_run.head_branch }}"
+
+          echo "Downloading version: ${TAG}"
 
           curl -fL -o bin/zeckit \
-            "https://github.com/${REPO}/releases/latest/download/zeckit-linux-x86_64"
+            "https://github.com/${REPO}/releases/download/${TAG}/zeckit-linux-x86_64"
 
           curl -fL -o bin/zeckit.sha256 \
-            "https://github.com/${REPO}/releases/latest/download/zeckit-linux-x86_64.sha256"
+            "https://github.com/${REPO}/releases/download/${TAG}/zeckit-linux-x86_64.sha256"
 
           cd bin
-          sha256sum -c zeckit.sha256
-          chmod +x zeckit
+          sha256sum -c zeckit-linux-x86_64.sha256
+          chmod +x zeckit-linux-x86_64
+          mv zeckit-linux-x86_64 zeckit
           cd ..
 
           echo "✓ CLI downloaded and verified"
