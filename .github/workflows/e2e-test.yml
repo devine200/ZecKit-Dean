@@ -42,12 +42,14 @@ jobs:
           REPO="${{ github.repository }}"
 
           # Extract tag from workflow_run event
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ inputs.version }}"
-          else
-            REF="${{ github.event.workflow_run.ref }}"
-            TAG="${REF#refs/tags/}"
-          fi
+          # if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          #   TAG="${{ inputs.version }}"
+          # else
+          #   REF="${{ github.event.workflow_run.ref }}"
+          #   TAG="${REF#refs/tags/}"
+          # fi
+
+          TAG="${{ github.event.workflow_run.head_branch }}"
 
           echo "Resolved tag: $TAG"
           echo "Repository: $REPO"
